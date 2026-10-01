@@ -1,0 +1,23 @@
+import 'dotenv/config';
+import express from 'express';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { openDatabase } from '../../../../packages/memory/src/database.js';
+import { Planner } from '../../../../packages/planner/src/planner.js';
+import { createTools } from '../../../../packages/tools/src/registry.js';
+import { ToolRegistry } from '../../../../packages/tools/src/tool-registry.js';
+import { AgentOrchestrator } from '../../../../packages/core/src/orchestrator.js';
+
+const host = process.env.JARVIS_HOST ?? '127.0.0.1'; const port = Number(process.env.JARVIS_PORT ?? 8765);
+const root = path.resolve(process.env.TRUSTED_DIRECTORIES?.split(',')[0] ?? './workspace');
+const db = openDatabase(process.env.DATABASE_PATH ?? './data/database/jarvis.db');
+const registry = new ToolRegistry(); for (const tool of createTools(root)) registry.register(tool);
+const planner = new Planner(); const agent = new AgentOrchestrator(registry, db); const app = express(); app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => { const token = process.env.JARVIS_AUTH_TOKEN; if (token && req.path.startsWith('/api') && req.headers.authorization !== `Bearer ${token}`) return res.status(401).json({ error: 'Unauthorized' }); next(); });
+app.get('/api/status', (_, res) => res.json({ name: 'DEVANSH JARVIS', api: 'ready', ai: process.env.LOCAL_AI_MODEL ? 'configured' : 'offline', database: 'ready', security: 'active', trustedRoot: root }));
+app.get('/api/tools', (_, res) => res.json(registry.list()));
+app.get('/api/logs', (_, res) => res.json(db.prepare('SELECT * FROM action_logs ORDER BY id DESC LIMIT 50').all()));
+app.get('/api/tasks', (_, res) => res.json(db.prepare('SELECT * FROM tasks ORDER BY id DESC').all()));
+app.post('/api/chat', async (req, res) => { try { if (typeof req.body?.message !== 'string') return res.status(400).json({ error: 'message is required' }); res.json(await agent.run(req.body.message, planner)); } catch (e) { res.status(400).json({ error: e instanceof Error ? e.message : String(e) }); } });
+app.use(express.static(path.resolve('apps/command-center/frontend')));
+app.listen(port, host, () => console.log(`DEVANSH JARVIS listening at http://${host}:${port}`));
